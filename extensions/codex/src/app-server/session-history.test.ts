@@ -159,12 +159,12 @@ describe("readCodexMirroredSessionHistoryMessages", () => {
     "projects native evidence within its budget ($oversized, incognito=$incognito)",
     async ({ oversized, incognito }) => {
       const { marker, sessionTarget } = await writeSqliteSession({ incognito });
-      for (let index = 0; index < (oversized ? 201 : 0); index += 1) {
-        await appendSessionTranscriptMessageByIdentity({
-          ...sessionTarget,
+      await appendSessionTranscriptMessagesByIdentity({
+        ...sessionTarget,
+        messages: Array.from({ length: oversized ? 201 : 0 }, (_, index) => ({
           message: { role: "user", content: `prior-${index}`, timestamp: index + 3 },
-        });
-      }
+        })),
+      });
       const unreadMarker = "synthetic-unread-settled-payload:";
       if (oversized) {
         await appendSessionTranscriptMessageByIdentity({
