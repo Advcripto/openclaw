@@ -42,7 +42,6 @@ const {
   resolveMessageActionTurnCapability,
   revokeMessageActionTurnCapability,
 } = await import("../../gateway/message-action-turn-capability.js");
-const { resolveProviderScopedAuthProfile } = await import("./agent-runner-auth-profile.js");
 const { setChannelSourceTurnId } = await import("./source-turn-id.js");
 
 function makeRun(overrides: Partial<FollowupRun["run"]> = {}): FollowupRun["run"] {
@@ -247,6 +246,8 @@ describe("agent-runner-utils", () => {
 
   it("builds embedded run base params with auth profile and run metadata", async () => {
     const run = makeRun({
+      authProfileId: "profile-openai",
+      authProfileIdSource: "user",
       enforceFinalTag: true,
       cwd: "/tmp/task-repo",
       taskSuggestionDeliveryMode: "gateway",
@@ -265,15 +266,8 @@ describe("agent-runner-utils", () => {
         toolNames: ["workboard_complete"],
       },
     });
-    const authProfile = resolveProviderScopedAuthProfile({
-      provider: "openai",
-      primaryProvider: "openai",
-      authProfileId: "profile-openai",
-      authProfileIdSource: "user",
-    });
-
     const resolved = await buildEmbeddedRunExecutionParams({
-      run: { ...run, ...authProfile },
+      run,
       provider: "openai",
       model: "gpt-4.1-mini",
       runId: "run-1",
@@ -354,13 +348,8 @@ describe("agent-runner-utils", () => {
       hasSessionModelOverride: true,
       hasAutoFallbackProvenance: true,
     });
-    const authProfile = resolveProviderScopedAuthProfile({
-      provider: "openai",
-      primaryProvider: "openai",
-    });
-
     const resolved = await buildEmbeddedRunExecutionParams({
-      run: { ...run, ...authProfile },
+      run,
       provider: "openai",
       model: "gpt-4.1-mini",
       runId: "run-1",
@@ -385,13 +374,8 @@ describe("agent-runner-utils", () => {
 
   it("disables embedded model fallbacks for a model-locked run", async () => {
     const run = makeRun({ modelSelectionLocked: true });
-    const authProfile = resolveProviderScopedAuthProfile({
-      provider: "openai",
-      primaryProvider: "openai",
-    });
-
     const resolved = await buildEmbeddedRunExecutionParams({
-      run: { ...run, ...authProfile },
+      run,
       provider: "openai",
       model: "gpt-4.1-mini",
       runId: "run-1",
@@ -414,13 +398,8 @@ describe("agent-runner-utils", () => {
 
   it("does not force final-tag enforcement for minimax providers", async () => {
     const run = makeRun({ enforceFinalTag: false });
-    const authProfile = resolveProviderScopedAuthProfile({
-      provider: "minimax",
-      primaryProvider: "minimax",
-    });
-
     const resolved = await buildEmbeddedRunExecutionParams({
-      run: { ...run, ...authProfile },
+      run,
       provider: "minimax",
       model: "MiniMax-M2.7",
       runId: "run-1",
