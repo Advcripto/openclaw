@@ -113,7 +113,7 @@ export function setPlatform(platform: string) {
   });
 }
 
-const LOOP_SIGNALS = ["SIGTERM", "SIGINT", "SIGUSR2"] as const;
+const LOOP_SIGNALS = ["SIGTERM", "SIGINT", "SIGHUP", "SIGUSR2"] as const;
 type LoopSignal = (typeof LOOP_SIGNALS)[number];
 
 function removeNewSignalListeners(signal: LoopSignal, existing: Set<(...args: unknown[]) => void>) {

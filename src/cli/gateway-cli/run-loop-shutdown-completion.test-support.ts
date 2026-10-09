@@ -55,74 +55,81 @@ export function registerGracefulGatewayShutdownTests({
     gatewayLog,
   });
 
-  it("exits 0 on SIGTERM after graceful close", async () => {
-    const gatewayStateOwner = { release: vi.fn(async () => {}) };
-    acquireGatewayLock.mockResolvedValueOnce(gatewayStateOwner);
+  it.each(["SIGTERM", "SIGINT", "SIGHUP"] as const)(
+    "exits 0 on %s after graceful close",
+    async (signal) => {
+      const gatewayStateOwner = { release: vi.fn(async () => {}) };
+      acquireGatewayLock.mockResolvedValueOnce(gatewayStateOwner);
 
-    await withIsolatedSignals(async ({ captureSignal }) => {
-      const { close, start, runtime, exited } = await createSignaledLoopHarness();
-      const localServiceStopStarted = createDeferredCore();
-      const localServiceStopped = createDeferredCore();
-      stopManagedProviderLocalServices.mockImplementationOnce(() => {
-        localServiceStopStarted.resolve();
-        return localServiceStopped.promise;
-      });
-      hasManagedProviderLocalServices.mockReturnValueOnce(true);
-      const sigterm = captureSignal("SIGTERM");
-      const { emitDiagnosticsTimelineEvent, flushDiagnosticsTimeline } =
-        await import("../../infra/diagnostics-timeline.js");
-      const tempDirs = createTempDirTracker();
-      const timelinePath = join(tempDirs.make("openclaw-gateway-stop-"), "timeline.jsonl");
-      let timelineAtLogFlush: string | undefined;
-      close.mockImplementationOnce(async () => {
-        emitDiagnosticsTimelineEvent(
-          { type: "mark", name: "gateway.stop" },
-          {
-            env: {
-              OPENCLAW_DIAGNOSTICS: "timeline",
-              OPENCLAW_DIAGNOSTICS_TIMELINE_PATH: timelinePath,
+      await withIsolatedSignals(async ({ captureSignal }) => {
+        const { close, start, runtime, exited } = await createSignaledLoopHarness();
+        const localServiceStopStarted = createDeferredCore();
+        const localServiceStopped = createDeferredCore();
+        stopManagedProviderLocalServices.mockImplementationOnce(() => {
+          localServiceStopStarted.resolve();
+          return localServiceStopped.promise;
+        });
+        hasManagedProviderLocalServices.mockReturnValueOnce(true);
+        const stop = captureSignal(signal);
+        const { emitDiagnosticsTimelineEvent, flushDiagnosticsTimeline } =
+          await import("../../infra/diagnostics-timeline.js");
+        const tempDirs = createTempDirTracker();
+        const timelinePath = join(tempDirs.make("openclaw-gateway-stop-"), "timeline.jsonl");
+        let timelineAtLogFlush: string | undefined;
+        close.mockImplementationOnce(async () => {
+          emitDiagnosticsTimelineEvent(
+            { type: "mark", name: "gateway.stop" },
+            {
+              env: {
+                OPENCLAW_DIAGNOSTICS: "timeline",
+                OPENCLAW_DIAGNOSTICS_TIMELINE_PATH: timelinePath,
+              },
             },
-          },
-        );
-      });
-      flushLogger.mockImplementationOnce(async () => {
-        expect(runtime.exit).not.toHaveBeenCalled();
-        timelineAtLogFlush = existsSync(timelinePath)
-          ? readFileSync(timelinePath, "utf8")
-          : undefined;
-      });
-
-      try {
-        sigterm();
-        await localServiceStopStarted.promise;
-
-        expect(close).toHaveBeenCalledWith({
-          reason: "gateway stopping",
-          restartExpectedMs: null,
+          );
         });
-        expect(runtime.exit).not.toHaveBeenCalled();
-        expect(flushLogger).not.toHaveBeenCalled();
-        localServiceStopped.resolve();
-
-        await expect(exited).resolves.toBe(0);
-        expect(start).toHaveBeenCalledWith({
-          processStartedAt: expect.any(Number),
-          startupStartedAt: expect.any(Number),
-          requestHotReloadRecovery: requestGatewayRestartWithSignalAdmission,
-          hostLifecycle: expect.objectContaining({ request: expect.any(Function) }),
-          startupOperation: expect.any(Function),
-          gatewayStateOwner,
+        flushLogger.mockImplementationOnce(async () => {
+          expect(runtime.exit).not.toHaveBeenCalled();
+          timelineAtLogFlush = existsSync(timelinePath)
+            ? readFileSync(timelinePath, "utf8")
+            : undefined;
         });
-        expect(stopManagedProviderLocalServices).toHaveBeenCalledOnce();
-        expect(flushLogger).toHaveBeenCalledOnce();
-        expect(timelineAtLogFlush).toContain('"name":"gateway.stop"');
-        expect(armShutdownHardExitWatchdog).not.toHaveBeenCalled();
-      } finally {
-        flushDiagnosticsTimeline();
-        tempDirs.cleanup();
-      }
-    });
-  });
+
+        try {
+          stop();
+          await localServiceStopStarted.promise;
+          stop();
+
+          expect(close).toHaveBeenCalledWith({
+            reason: "gateway stopping",
+            restartExpectedMs: null,
+          });
+          expect(runtime.exit).not.toHaveBeenCalled();
+          expect(flushLogger).not.toHaveBeenCalled();
+          localServiceStopped.resolve();
+
+          await expect(exited).resolves.toBe(0);
+          expect(runtime.exit).toHaveBeenCalledOnce();
+          expect(close).toHaveBeenCalledOnce();
+          expect(start).toHaveBeenCalledOnce();
+          expect(start).toHaveBeenCalledWith({
+            processStartedAt: expect.any(Number),
+            startupStartedAt: expect.any(Number),
+            requestHotReloadRecovery: requestGatewayRestartWithSignalAdmission,
+            hostLifecycle: expect.objectContaining({ request: expect.any(Function) }),
+            startupOperation: expect.any(Function),
+            gatewayStateOwner,
+          });
+          expect(stopManagedProviderLocalServices).toHaveBeenCalledOnce();
+          expect(flushLogger).toHaveBeenCalledOnce();
+          expect(timelineAtLogFlush).toContain('"name":"gateway.stop"');
+          expect(armShutdownHardExitWatchdog).not.toHaveBeenCalled();
+        } finally {
+          flushDiagnosticsTimeline();
+          tempDirs.cleanup();
+        }
+      });
+    },
+  );
   it.each([true])("joins host EOF shutdown (closing restart=%s)", async (restart) => {
     await withHostLifeline(async (input) => {
       if (!restart) {

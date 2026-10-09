@@ -133,7 +133,12 @@ describe("gateway lifecycle hub import boundaries", () => {
             const originalOn = process.on.bind(process);
             const installed: string[] = [];
             vi.spyOn(process, "on").mockImplementation((event, listener) => {
-              if (event === "SIGTERM" || event === "SIGINT" || event === "SIGUSR2") {
+              if (
+                event === "SIGTERM" ||
+                event === "SIGINT" ||
+                event === "SIGHUP" ||
+                event === "SIGUSR2"
+              ) {
                 expect(primed, `lifecycle import must finish before installing ${event}`).toBe(
                   true,
                 );
@@ -155,7 +160,7 @@ describe("gateway lifecycle hub import boundaries", () => {
               finishImport.resolve();
               await Promise.race([waitForStart(started), loop]);
               abortSignal.throwIfAborted();
-              expect(installed).toEqual(["SIGTERM", "SIGINT", "SIGUSR2"]);
+              expect(installed).toEqual(["SIGTERM", "SIGINT", "SIGHUP", "SIGUSR2"]);
 
               const missingChunk = vi.fn(() => {
                 throw Object.assign(new Error("rotated lifecycle chunk"), {

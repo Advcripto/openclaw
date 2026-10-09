@@ -31,7 +31,7 @@ openclaw gateway run   # equivalent, explicit form
     - `--bind` values `lan`, `tailnet`, and `custom` resolve over IPv4-only paths; IPv6-only bring-your-own-host setups need an IPv4 sidecar or proxy in front of the Gateway.
     - `SIGUSR2` triggers an in-process restart when authorized. `commands.restart` (default: enabled) gates externally-sent `SIGUSR2`; set it to `false` to block manual OS-signal restarts. The agent-facing `gateway` tool is read-only; agents request restart through the `openclaw` delegation tool. Effective Full Access, including Default (Full Access), authorizes permitted delegated changes without an approval prompt; restricted runs require human approval. See [Delegated setup and repair](/gateway/permission-modes#delegated-setup-and-repair).
     - `SIGUSR1` is reserved for Node's inspector, so attaching a debugger does not restart the Gateway. Prefer `openclaw gateway restart` for restarts; update manual restart scripts to send `SIGUSR2`.
-    - `SIGINT`/`SIGTERM` stop the process but do not restore custom terminal state — if you wrap the CLI in a TUI or raw-mode input, restore the terminal yourself before exit.
+    - `SIGINT`/`SIGTERM`/`SIGHUP` gracefully stop the process, including managed local model services. `SIGHUP` leaves replacement to the service supervisor or your next explicit launch. These signals do not restore custom terminal state — if you wrap the CLI in a TUI or raw-mode input, restore the terminal yourself before exit.
 
   </Accordion>
 </AccordionGroup>

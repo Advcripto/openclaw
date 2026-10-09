@@ -13,6 +13,7 @@ type GatewaySuspendAdmissionPhase = GatewaySuspension["phase"];
 export type GatewayShutdownTrigger =
   | "SIGTERM"
   | "SIGINT"
+  | "SIGHUP"
   | "SIGUSR2"
   | "hosted Gateway stop"
   | "host lifeline closed";

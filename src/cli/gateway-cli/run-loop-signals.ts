@@ -213,20 +213,22 @@ export function createGatewayRunSignals(params: {
       },
     );
   };
-  const onSigint = () => {
-    observeSignal("SIGINT");
-    gatewayLog.debug("signal SIGINT received");
+  const onStopSignal = (signal: "SIGINT" | "SIGHUP") => {
+    observeSignal(signal);
+    gatewayLog.debug(`signal ${signal} received`);
     if (params.isForcedExitStarted()) {
-      request("stop", "SIGINT");
+      request("stop", signal);
       return;
     }
     enqueueSignal(
       false,
       (_intent, acceptedAtMs) =>
-        request("stop", "SIGINT", undefined, undefined, undefined, { acceptedAtMs }),
-      (error) => gatewayLog.error(`failed to handle SIGINT: ${formatErrorMessage(error)}`),
+        request("stop", signal, undefined, undefined, undefined, { acceptedAtMs }),
+      (error) => gatewayLog.error(`failed to handle ${signal}: ${formatErrorMessage(error)}`),
     );
   };
+  const onSigint = () => onStopSignal("SIGINT");
+  const onSighup = () => onStopSignal("SIGHUP");
   const restartSignalFailed = (err: unknown, releaseToken = true) => {
     gatewayLog.error(`SIGUSR2 handler failed: ${formatErrorMessage(err)}`);
     if (!releaseToken) {
@@ -302,6 +304,7 @@ export function createGatewayRunSignals(params: {
 
   process.on("SIGTERM", onSigterm);
   process.on("SIGINT", onSigint);
+  process.on("SIGHUP", onSighup);
   // SIGUSR1 belongs to Node's on-demand inspector; never register a listener for it.
   process.on("SIGUSR2", onRestartSignal);
   const retire = () => {
@@ -324,6 +327,7 @@ export function createGatewayRunSignals(params: {
       retire();
       process.removeListener("SIGTERM", onSigterm);
       process.removeListener("SIGINT", onSigint);
+      process.removeListener("SIGHUP", onSighup);
       process.removeListener("SIGUSR2", onRestartSignal);
     },
   };
