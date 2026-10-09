@@ -11,11 +11,10 @@ type DurableHistoryReadOperationRequest = Extract<
   SessionTranscriptWorkerInput,
   {
     kind:
+      | "trajectory-retention"
       | "board-snapshot"
       | "board-widget-document"
       | "transcript-match"
-      | "transcript-search"
-      | "transcript-search-current"
       | "branch-summaries"
       | "session-title-fields"
       | "session-preview"
@@ -48,11 +47,10 @@ export function isSessionHistoryReadOperation(
   request: SessionTranscriptWorkerInput,
 ): request is DurableHistoryReadOperationRequest {
   switch (request.kind) {
+    case "trajectory-retention":
     case "board-snapshot":
     case "board-widget-document":
     case "transcript-match":
-    case "transcript-search":
-    case "transcript-search-current":
     case "branch-summaries":
     case "session-title-fields":
     case "session-preview":
@@ -107,6 +105,37 @@ async function prepareHistoryRead(
   retainedDatabase?: OpenClawAgentReadOnlyDatabase,
 ): Promise<() => SessionTranscriptWorkerValues[SessionHistoryReadOperationRequest["kind"]]> {
   switch (request.kind) {
+    case "trajectory-retention": {
+      const [
+        { withOpenClawAgentDatabaseReadOnly },
+        { assertOpenClawAgentDatabaseIdentity },
+        { prepareTrajectoryRuntimeRetention },
+        { adoptPreparedCanonicalSessionValidationSchema },
+      ] = await Promise.all([
+        import("../../state/openclaw-agent-db-readonly.js"),
+        import("../../state/openclaw-agent-db-identity.js"),
+        import("../../trajectory/runtime-retention.sqlite.js"),
+        import("../../state/openclaw-agent-canonical-validation-schema.js"),
+      ]);
+      if (request.schemaContract) {
+        adoptPreparedCanonicalSessionValidationSchema(request.schemaContract);
+      }
+      return () => {
+        const read = withOpenClawAgentDatabaseReadOnly(
+          (database) => {
+            assertOpenClawAgentDatabaseIdentity(database, request.expectedIdentity);
+            const plan = prepareTrajectoryRuntimeRetention(database.db, request.input, request.now);
+            assertOpenClawAgentDatabaseIdentity(database, request.expectedIdentity);
+            return plan;
+          },
+          { ...request.database, env: request.env },
+        );
+        if (!read.found) {
+          throw new Error(`Trajectory retention cannot read its database: ${read.reason}`);
+        }
+        return { kind: request.kind, plan: read.value };
+      };
+    }
     case "session-memory-capture": {
       const { readSessionMemoryCapture } =
         await import("../../hooks/bundled/session-memory/capture.worker.js");
@@ -187,11 +216,12 @@ async function prepareHistoryRead(
     case "transcript-anchors": {
       const [
         { withOpenClawAgentDatabaseReadOnly },
-        { readSessionTranscriptAnchorFactsInDatabase },
+        { readSessionTranscriptAnchorFactsInDatabase, prepareSessionTranscriptAnchorMessageReader },
       ] = await Promise.all([
         import("../../state/openclaw-agent-db-readonly.js"),
         import("./session-transcript-anchor-read.kernel.js"),
       ]);
+      const readMessage = await prepareSessionTranscriptAnchorMessageReader(request.selection);
       return () => {
         assertExistingDatabaseIdentity(
           request.database.path,
@@ -204,6 +234,7 @@ async function prepareHistoryRead(
               database,
               request.resolved,
               request.selection,
+              readMessage,
             ),
           { ...request.database, env: request.resolved.env },
         );
@@ -217,7 +248,7 @@ async function prepareHistoryRead(
         { readHarnessCompletionSourceInDatabase },
       ] = await Promise.all([
         import("../../state/openclaw-agent-db-readonly.js"),
-        import("./session-accessor.sqlite-exact-read.js"),
+        import("./session-entry-read-source.js"),
         import("./session-harness-completion-source.kernel.js"),
       ]);
       return () => {
@@ -243,7 +274,7 @@ async function prepareHistoryRead(
         { readPendingInputSourceInDatabase },
       ] = await Promise.all([
         import("../../state/openclaw-agent-db-readonly.js"),
-        import("./session-accessor.sqlite-exact-read.js"),
+        import("./session-entry-read-source.js"),
         import("./session-pending-input-source.kernel.js"),
       ]);
       return () => {
@@ -282,28 +313,6 @@ async function prepareHistoryRead(
         );
         return { kind: request.kind, result: opened.found ? opened.value : undefined };
       };
-    }
-    case "transcript-search-current": {
-      const { isSessionTranscriptSearchCurrentSync } =
-        await import("./session-transcript-search.js");
-      return () => ({
-        kind: request.kind,
-        current: isSessionTranscriptSearchCurrentSync(request.revision, {
-          ...request.database,
-          env: request.env,
-        }),
-      });
-    }
-    case "transcript-search": {
-      const { searchSessionTranscriptsReadOnlySync } =
-        await import("./session-transcript-search.js");
-      return () => ({
-        kind: request.kind,
-        result: searchSessionTranscriptsReadOnlySync(request.params, {
-          ...request.database,
-          env: cloneEnvWithPlatformSemantics(request.params.env ?? process.env),
-        }),
-      });
     }
     case "branch-summaries": {
       const { readSessionBranchSnapshot, readSessionBranchSummariesInWorker } =
@@ -408,7 +417,7 @@ async function prepareHistoryRead(
       const [{ withOpenClawAgentDatabaseReadOnly }, { hasSessionTranscriptMessageInDatabase }] =
         await Promise.all([
           import("../../state/openclaw-agent-db-readonly.js"),
-          import("./session-accessor.sqlite-read.js"),
+          import("./session-accessor.sqlite-transcript-metadata-read.js"),
         ]);
       return () => {
         const read = withOpenClawAgentDatabaseReadOnly(
