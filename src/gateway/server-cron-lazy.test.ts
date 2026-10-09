@@ -258,6 +258,7 @@ describe("createLazyGatewayCronState", () => {
     "retains lazy Hook wake admission authority through loading (%s)",
     async (outcome) => {
       const cron = createCronService();
+      const start = vi.spyOn(cron, "start");
       const state = createCronState(cron);
       const deferHookWake = vi.fn<NonNullable<GatewayCronState["deferHookWake"]>>(async (opts) => {
         opts.commitGuard();
@@ -284,7 +285,7 @@ describe("createLazyGatewayCronState", () => {
       if (outcome === "active") {
         await expect(accepted).resolves.toEqual({ ok: true, eventOutcome: "queued" });
         expect(deferHookWake).toHaveBeenCalledOnce();
-        expect(cron.start).not.toHaveBeenCalled();
+        expect(start).not.toHaveBeenCalled();
       } else {
         await expect(accepted).rejects.toThrow(
           outcome === "stopped" ? "Scheduled Hook wake owner changed" : "caller revoked",

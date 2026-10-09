@@ -24,6 +24,7 @@ import {
   runUpgradeSurvivorOpenClawStep,
 } from "../../scripts/e2e/lib/upgrade-survivor/config-recipe.mts";
 import { buildInlineProviderModels } from "../../src/agents/embedded-agent-runner/model.inline-provider.js";
+import { projectRetiredHeartbeatConfig } from "../../src/commands/doctor-heartbeat-legacy.js";
 import { AgentsSchema } from "../../src/config/zod-schema.agents.js";
 import { ModelsConfigSchema } from "../../src/config/zod-schema.core.js";
 
@@ -597,7 +598,8 @@ esac
         ]);
       } else {
         expect(agents.ownership).toBe("explicit");
-        expect(AgentsSchema.safeParse(agents).success).toBe(true);
+        const candidate = projectRetiredHeartbeatConfig({ agents });
+        expect(AgentsSchema.safeParse(candidate.agents).success).toBe(true);
       }
       const baseStep = resolveUpgradeSurvivorConfigStepsForBaseline("base", version).find(
         (step) => step.id === "agents",
@@ -621,13 +623,14 @@ esac
     },
   );
 
-  it("authors a schema-valid roster at the explicit ownership boundary", () => {
+  it("authors a migration-valid roster at the explicit ownership boundary", () => {
     const version = "2026.8.1-beta.2";
     const agentStep = resolveUpgradeSurvivorConfigStepsForBaseline("base", version).find(
       (step) => step.id === "agents",
     );
     const agents = JSON.parse(agentStep?.argv[3] ?? "{}");
-    expect(AgentsSchema.safeParse(agents).success).toBe(true);
+    const candidate = projectRetiredHeartbeatConfig({ agents });
+    expect(AgentsSchema.safeParse(candidate.agents).success).toBe(true);
     expect(agents.ownership).toBe("explicit");
     expect(agents.defaults.heartbeat.every).toBe("0m");
     expect(Object.keys(agents.entries)).toEqual(["main", "ops"]);

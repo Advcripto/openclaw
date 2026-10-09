@@ -402,6 +402,8 @@ describe("executeAgentTurn: runtime selection", () => {
 
     const executeAgentTurn = await getExecuteAgentTurnForTest();
     const followupRun = createFollowupRun();
+    followupRun.run.internalEventExecution = { onStarted: vi.fn(), onTerminal: vi.fn() };
+    followupRun.run.inputProvenance = { kind: "internal_system", sourceTool: "test-event" };
     followupRun.run.provider = "anthropic";
     followupRun.run.model = "claude-opus-4-6";
     followupRun.run.config = {

@@ -10,7 +10,10 @@ import { readCodexSessionContext } from "openclaw/plugin-sdk/codex-session-trans
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { WorkerTaskPool } from "openclaw/plugin-sdk/process-runtime";
 import { upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
-import { appendSessionTranscriptMessageByIdentity } from "openclaw/plugin-sdk/session-transcript-runtime";
+import {
+  appendSessionTranscriptMessageByIdentity,
+  appendSessionTranscriptMessagesByIdentity,
+} from "openclaw/plugin-sdk/session-transcript-runtime";
 import { runOpenClawAgentWriteAdmission } from "openclaw/plugin-sdk/sqlite-runtime";
 import { observeHostDataSql } from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import { describe, expect, it, vi } from "vitest";
@@ -121,9 +124,10 @@ describe("readCodexMirroredSessionHistoryMessages", () => {
         ),
       );
       settledMessages.splice(1, 0, ...extra);
-      for (const message of settledMessages) {
-        await appendSessionTranscriptMessageByIdentity({ ...sessionTarget, message });
-      }
+      await appendSessionTranscriptMessagesByIdentity({
+        ...sessionTarget,
+        messages: settledMessages.map((message) => ({ message })),
+      });
       const warn = vi.spyOn(embeddedAgentLog, "warn").mockImplementation(() => {});
       try {
         await expect(

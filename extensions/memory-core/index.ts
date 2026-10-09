@@ -342,7 +342,7 @@ export default definePluginEntry({
     api.on(
       "before_agent_reply",
       async (_event, ctx) => {
-        if (ctx.trigger !== "cron") {
+        if (ctx.trigger !== "heartbeat" && ctx.trigger !== "cron") {
           return undefined;
         }
         try {
@@ -361,7 +361,7 @@ export default definePluginEntry({
         }
         return undefined;
       },
-      { eligibleTriggers: ["cron"] },
+      { eligibleTriggers: ["heartbeat", "cron"] },
     );
 
     api.registerCommand({
