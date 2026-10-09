@@ -6,6 +6,14 @@ import { createManagedHandoffTestBinding } from "../../test/helpers/managed-hand
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { writeOpenClawConfig } from "../config/test-helpers.js";
 import { resolveGatewayTaskScriptPath } from "../daemon/paths.js";
+import { stageScheduledTask } from "../daemon/schtasks-install.js";
+import {
+  buildTaskScript,
+  buildHiddenLauncherScript,
+  readScheduledTaskCommand,
+  resolveTaskLauncherScriptPath,
+} from "../daemon/schtasks-layout.js";
+import { buildScheduledTaskXml } from "../daemon/schtasks-xml.js";
 import type { GatewayServiceCommandConfig } from "../daemon/service-types.js";
 import { GatewayServiceAuthorityError } from "../daemon/service-update-authority.js";
 import type { GatewayService } from "../daemon/service.js";
@@ -22,6 +30,7 @@ import * as sqliteWorkerStores from "../infra/sqlite-worker-store.js";
 import { resolveManagedUpdateLeaseDatabasePath } from "../infra/update-managed-service-handoff-lease.js";
 import { readUpdateRunDriver } from "../infra/update-run-driver.js";
 import { createUpdateRun } from "../infra/update-run-ledger.js";
+import * as windowsEncoding from "../infra/windows-encoding.js";
 import { readSecretStoreValue } from "../secrets/store/secret-store.js";
 import { getOpenClawDatabaseMaintenanceScope } from "../state/openclaw-state-db-async-lifecycle.js";
 import {
@@ -51,6 +60,7 @@ const mocks = vi.hoisted(() => ({
   confirm: vi.fn(),
   note: vi.fn(),
   health: vi.fn(async () => ({ outcome: "ready", healthy: true })),
+  task: vi.fn<typeof import("../daemon/schtasks-exec.js").execSchtasks>(),
   suspend: vi.fn<typeof import("../daemon/schtasks.js").suspendScheduledTaskAutoStartForUpdate>(),
   resume: vi.fn<typeof import("../daemon/schtasks.js").resumeScheduledTaskAutoStartAfterUpdate>(),
 }));
@@ -80,6 +90,10 @@ vi.mock("@clack/prompts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@clack/prompts")>()),
   confirm: mocks.confirm,
 }));
+vi.mock("../daemon/schtasks-exec.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../daemon/schtasks-exec.js")>()),
+  execSchtasks: mocks.task,
+}));
 vi.mock("../daemon/schtasks.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../daemon/schtasks.js")>()),
   suspendScheduledTaskAutoStartForUpdate: mocks.suspend,
@@ -93,8 +107,15 @@ vi.mock("./doctor-service-repair-policy.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./doctor-service-repair-policy.js")>()),
   shouldManageGatewayService: async () => true,
 }));
-vi.mock("./daemon-install-helpers.js", () => ({
-  buildGatewayInstallPlan: async ({ port }: { port: number }) => {
+vi.mock("./daemon-install-helpers.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./daemon-install-helpers.js")>()),
+  buildGatewayInstallPlan: async ({
+    port,
+    existingEnvironment,
+  }: {
+    port: number;
+    existingEnvironment?: Record<string, string>;
+  }) => {
     mocks.installPlanBuilt = true;
     return {
       programArguments: [
@@ -105,6 +126,7 @@ vi.mock("./daemon-install-helpers.js", () => ({
         String(port),
       ],
       environment: {
+        ...(existingEnvironment?.OPENCLAW_SERVICE_MARKER === "openclaw" ? existingEnvironment : {}),
         HOME: process.env.HOME,
         PATH: "/usr/bin:/bin",
         OPENCLAW_PROFILE: process.env.OPENCLAW_PROFILE,
@@ -185,6 +207,13 @@ async function runInstallationCase(params: {
   tokenRecovery?: "success" | "writer-unavailable" | "no-consent";
   revoked?: "unchanged" | "restored" | "unclassified";
   initiallyStopped?: boolean;
+  removedPackage?:
+    | "managed"
+    | "entry-only"
+    | "legacy-launcher"
+    | "custom-script"
+    | "foreign-entry"
+    | "foreign-dist-entry";
   releaseStateBeforeFinish?: boolean;
   inspectionFailure?: "lost-before-install";
   restorationInspectionFailure?: "unknown-runtime";
@@ -199,14 +228,14 @@ async function runInstallationCase(params: {
   };
 }) {
   const { installFails, initiallyStopped } = params;
-  if (params.consent) {
+  if (params.consent || params.removedPackage) {
     const { auditGatewayServiceConfig } = await vi.importActual<
       typeof import("../daemon/service-audit.js")
     >("../daemon/service-audit.js");
     mocks.audit.mockImplementation(auditGatewayServiceConfig);
-    mocks.confirm.mockResolvedValue(params.consent.approved);
+    mocks.confirm.mockResolvedValue(params.consent?.approved ?? false);
     Object.defineProperty(process.stdin, "isTTY", {
-      value: params.consent.interactive,
+      value: params.consent?.interactive ?? false,
       configurable: true,
     });
   }
@@ -224,8 +253,18 @@ async function runInstallationCase(params: {
     params.consent?.mixed === "version-managed-runtime"
       ? path.join(home, ".nvm", "versions", "node", "v26.8.1", "bin", "node")
       : path.join(home, "runtime", params.bun ? "bun" : "node");
-  const oldRoot = path.join(home, "prefix-a/lib/node_modules/openclaw");
-  mocks.activeRoot = path.join(home, "prefix-b/lib/node_modules/openclaw");
+  const oldRoot = path.join(
+    home,
+    params.removedPackage
+      ? "pnpm/global/5/.pnpm/openclaw@2026.9.4/node_modules/openclaw"
+      : "prefix-a/lib/node_modules/openclaw",
+  );
+  mocks.activeRoot = path.join(
+    home,
+    params.removedPackage
+      ? "pnpm/global/5/node_modules/openclaw"
+      : "prefix-b/lib/node_modules/openclaw",
+  );
   for (const [root, version] of [
     [oldRoot, "2026.9.4"],
     [mocks.activeRoot, "2026.9.17"],
@@ -241,6 +280,7 @@ async function runInstallationCase(params: {
     {
       HOME: home,
       USERPROFILE: home,
+      USERNAME: "fixture",
       OPENCLAW_HOME: undefined,
       OPENCLAW_STATE_DIR: undefined,
       OPENCLAW_CONFIG_PATH: undefined,
@@ -276,11 +316,59 @@ async function runInstallationCase(params: {
         ],
         environment: {
           HOME: home,
-          PATH: "/usr/bin:/bin",
+          ...(params.removedPackage
+            ? { OPENCLAW_SERVICE_MARKER: "openclaw", OPENCLAW_SERVICE_KIND: "gateway" }
+            : { PATH: "/usr/bin:/bin" }),
           ...(params.tokenRecovery ? { OPENCLAW_GATEWAY_TOKEN: "maintenance-fixture-token" } : {}),
         },
       };
+      if (params.removedPackage) {
+        if (params.removedPackage === "foreign-entry") {
+          command.programArguments[1] = path.join(home, "unrelated", "foreign.js");
+        } else if (params.removedPackage === "foreign-dist-entry") {
+          command.programArguments[1] = path.join(oldRoot, "dist", "custom.js");
+        }
+        vi.spyOn(windowsEncoding, "resolveWindowsOemCodePage").mockReturnValue(437);
+        await fs.mkdir(path.dirname(sourcePath!), { recursive: true });
+        await fs.writeFile(
+          sourcePath!,
+          buildTaskScript(command) +
+            (params.removedPackage === "custom-script" ? "echo operator-owned\r\n" : ""),
+        );
+        if (params.removedPackage === "entry-only") {
+          await fs.unlink(path.join(oldRoot, "dist/index.js"));
+        } else {
+          await fs.rm(oldRoot, { recursive: true });
+        }
+        const hiddenPath = resolveTaskLauncherScriptPath(
+          { OPENCLAW_WINDOWS_TASK_HIDDEN_LAUNCHER: "1" },
+          sourcePath!,
+        );
+        if (params.removedPackage === "legacy-launcher") {
+          await fs.writeFile(
+            hiddenPath,
+            buildHiddenLauncherScript({ scriptPath: sourcePath!, taskSupervisor: true }),
+          );
+        }
+        mocks.task.mockResolvedValue({
+          code: 0,
+          stderr: "",
+          stdout: buildScheduledTaskXml({
+            taskDescription: "OpenClaw Gateway",
+            taskUser: "fixture",
+            interactive: params.removedPackage === "legacy-launcher",
+            launchPath: params.removedPackage === "legacy-launcher" ? hiddenPath : sourcePath!,
+          }),
+        });
+      }
       const originalCommand = structuredClone(command);
+      const originalTaskScript = params.removedPackage ? await fs.readFile(sourcePath!) : undefined;
+      if (params.removedPackage) {
+        const statusAudit = await mocks.audit({ env: process.env, command, platform: "win32" });
+        expect(statusAudit.issues).toContainEqual(
+          expect.objectContaining({ code: "gateway-entrypoint-missing" }),
+        );
+      }
       let running = !initiallyStopped;
       const pid = mocks.gatewayPid;
       mocks.resident.mockImplementation(() => (running ? { pid } : undefined));
@@ -296,7 +384,23 @@ async function runInstallationCase(params: {
       const service = createMockGatewayService({
         isAbsent: async () => false,
         isLoaded: async () => true,
-        readCommand: async () => command,
+        readCommand: async (env, options) => {
+          if (!params.removedPackage) {
+            return command;
+          }
+          const parsed = await readScheduledTaskCommand(env);
+          if (!parsed || !options?.requireLoaded || params.removedPackage === "legacy-launcher") {
+            return parsed;
+          }
+          // Native registration adds its default cwd while retaining the authored script.
+          const { sourcePath: script, ...managedDefinition } = parsed;
+          return {
+            ...parsed,
+            workingDirectory: path.dirname(script!),
+            managedDefinition,
+            managedOverrides: {},
+          };
+        },
         readRuntime: async (env, opts) => {
           nativeInspectionReads += 1;
           if (
@@ -371,6 +475,9 @@ async function runInstallationCase(params: {
           }
           if (installFails) {
             throw new Error("Synthetic native install rollback");
+          }
+          if (params.removedPackage) {
+            await stageScheduledTask(plan);
           }
           command = {
             ...(sourcePath ? { sourcePath } : {}),
@@ -565,6 +672,32 @@ async function runInstallationCase(params: {
         } catch (error) {
           finishError = error;
         }
+        if (params.removedPackage) {
+          expect(finishError).toBeUndefined();
+          const foreign = params.removedPackage.startsWith("foreign-");
+          const repaired = params.removedPackage !== "custom-script" && !foreign;
+          if (foreign) {
+            expect(runtime.error).toHaveBeenCalledWith(
+              expect.stringContaining("unknown or foreign installation"),
+            );
+          } else {
+            expect(runtime.error).not.toHaveBeenCalled();
+          }
+          if (repaired) {
+            expect(mocks.note.mock.calls.flat().join("\n")).toContain("Backup:");
+          } else {
+            expect(await fs.readFile(sourcePath!)).toEqual(originalTaskScript);
+          }
+          expect(events).toEqual(["repair-state", ...(repaired ? ["install"] : [])]);
+          expect(running).toBe(repaired);
+          expect(command.programArguments[1]).toBe(
+            repaired
+              ? path.join(mocks.activeRoot, "dist/index.js")
+              : originalCommand.programArguments[1],
+          );
+          expect(mocks.confirm).not.toHaveBeenCalled();
+          return;
+        }
         if (params.tokenRecovery) {
           expect(finishError).toBeUndefined();
           const bytes = await fs.readFile(configPath!, "utf8");
@@ -705,6 +838,12 @@ async function runInstallationCase(params: {
 type InstallationCase = Omit<Parameters<typeof runInstallationCase>[0], "mode">;
 
 it.each<InstallationCase>([
+  { platform: "win32", initiallyStopped: true, removedPackage: "managed" },
+  { platform: "win32", initiallyStopped: true, removedPackage: "entry-only" },
+  { platform: "win32", initiallyStopped: true, removedPackage: "custom-script" },
+  { platform: "win32", initiallyStopped: true, removedPackage: "legacy-launcher" },
+  { platform: "win32", initiallyStopped: true, removedPackage: "foreign-entry" },
+  { platform: "win32", initiallyStopped: true, removedPackage: "foreign-dist-entry" },
   { platform: "linux", tokenRecovery: "success", installFails: false },
   { platform: "linux", tokenRecovery: "writer-unavailable", installFails: false },
   { platform: "linux", tokenRecovery: "no-consent", installFails: false },

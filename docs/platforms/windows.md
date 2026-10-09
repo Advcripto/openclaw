@@ -188,6 +188,17 @@ Scheduler's **End** action terminates the Gateway and its descendants. After
 updating an older installation, run `openclaw gateway install --force` to
 regenerate the launcher if the update did not refresh it.
 
+For pnpm global installs, the generated launcher uses the verified stable
+`node_modules/openclaw` package link instead of a versioned `.pnpm` store path.
+This keeps the task startable after a direct `pnpm update -g openclaw`, even when
+no managed OpenClaw update runs. Node remains the launcher's direct child so
+task supervision continues to work.
+
+If an older launcher points at a deleted package generation, status and Doctor
+report the missing entrypoint. Run `openclaw doctor --fix` from the current
+installation to repair a stopped, generated task. Repair backs up the task
+definition and launcher files; custom or unverifiable launchers remain unchanged.
+
 Reinstalling a managed Scheduled Task stops and settles its previous process
 before publishing and starting the replacement. This also applies when both
 installations use Node or only the service arguments change. Status verifies

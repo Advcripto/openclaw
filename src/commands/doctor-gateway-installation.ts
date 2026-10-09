@@ -55,7 +55,7 @@ export async function installDoctorGatewayService(
   params: Omit<GatewayServiceInstallationRepair, "activeRoot"> & {
     repair:
       | { kind: "config"; root?: string }
-      | { kind: "definition" | "installation"; root: string };
+      | { kind: "definition" | "installation" | "missing-entrypoint"; root: string };
     args: GatewayServiceInstallArgs;
     runtime: RuntimeEnv;
   },
@@ -86,6 +86,7 @@ export async function installDoctorGatewayService(
           root: params.repair.root,
           command: params.command,
           expectedCommand: params.args,
+          repairMissingWindowsEntrypoint: params.repair.kind === "missing-entrypoint",
           install: publish,
           warn: (message) => note(message, "Gateway service definition"),
         });

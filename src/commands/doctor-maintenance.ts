@@ -154,6 +154,24 @@ export async function beginDoctorMaintenance(params: DoctorMaintenanceParams) {
     assertCustody?.();
     const before = stopped;
     const root = params.root;
+    if (process.platform === "win32" && root && !before?.stopped) {
+      const { repairMissingDoctorGatewayEntrypoint } =
+        await import("./doctor-maintenance-restoration.js");
+      if (
+        await repairMissingDoctorGatewayEntrypoint({
+          env,
+          cfg,
+          options: params.options,
+          runtime: params.runtime,
+          signal: exit.signal,
+          writeConfig,
+          assertCustody,
+          assertRestoreAdmission,
+        })
+      ) {
+        return;
+      }
+    }
     if (!before?.serviceEnv || !root) {
       return;
     }

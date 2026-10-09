@@ -5835,7 +5835,6 @@
 ["src/commands/doctor-maintenance.finish-revalidation.test.ts","../daemon/systemd-maintenance.js","4c5843e5d264347912a5f538a19a39065addeb5d71b33c6701885d029207ce3d",1]
 ["src/commands/doctor-maintenance.installation.test.ts","../../packages/terminal-core/src/note.js","f5864cdeb859b12765491a2066778d233cade85ee0bc133481fa4580397b105b",1]
 ["src/commands/doctor-maintenance.installation.test.ts","../daemon/service-process-membership.js","38725ad196ec333ca52b749e90179c6cf76a3679fb78ff62a9ba453953090fb7",1]
-["src/commands/doctor-maintenance.installation.test.ts","./daemon-install-helpers.js","ba28c8e6dac2280e67d60022b44cc905c7875f72eda46504af33068a6fc47aa9",1]
 ["src/commands/doctor-maintenance.native-identity.test.ts","../daemon/service-process-membership.js","c1c2c5bb233117ee840464400f14c8301cf53f61ef7fbe5bd4ffaabbada91cd8",1]
 ["src/commands/doctor-maintenance.native-identity.test.ts","../infra/container-environment.js","49f6790d3c5aa8463780d2b9a2aac56849437f14e4f295958e53c7ddf409424b",1]
 ["src/commands/doctor-maintenance.native-identity.test.ts","../infra/tmp-openclaw-dir.js","2ae601b57f62509c5f6d8595dc7e1d864f83f4b7263f8cf2ef15f9e386395ced",1]

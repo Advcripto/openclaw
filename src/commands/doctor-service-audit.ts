@@ -27,11 +27,20 @@ export function reportServiceDefinitionDrift(audit: ServiceConfigAudit) {
 }
 
 /** Installation repair cannot implicitly approve other service-definition changes. */
-export function isServiceInstallationOnlyRepair(audit: ServiceConfigAudit): boolean {
+export function isServiceInstallationOnlyRepair(
+  audit: ServiceConfigAudit,
+  options: { allowOutdatedDefinition?: boolean } = {},
+): boolean {
   return (
     !audit.definitionDriftError &&
-    !audit.definitionDrift?.length &&
-    audit.issues.every((issue) => issue.code === SERVICE_AUDIT_CODES.gatewayEntrypointMismatch)
+    (!audit.definitionDrift?.length ||
+      (options.allowOutdatedDefinition === true &&
+        audit.definitionDrift.every((finding) => finding.kind === "outdated"))) &&
+    audit.issues.every(
+      (issue) =>
+        issue.code === SERVICE_AUDIT_CODES.gatewayEntrypointMismatch ||
+        issue.code === SERVICE_AUDIT_CODES.gatewayEntrypointMissing,
+    )
   );
 }
 

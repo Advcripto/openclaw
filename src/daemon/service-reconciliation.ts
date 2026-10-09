@@ -1,12 +1,18 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { formatCliCommand } from "../cli/command-format.js";
 import { UPDATE_RUN_ID_ENV } from "../infra/update-control-plane-sentinel.js";
 import { recordUpdateRunStep } from "../infra/update-run-ledger.js";
 import { hasCommandProcessCleanupError } from "../process/exec-result.js";
+import { buildGatewayInstallEntrypointCandidates } from "./gateway-entrypoint.js";
+import { resolveTaskScriptPath } from "./schtasks-layout.js";
 import { auditGatewayServiceConfig, type GatewayServiceExpectedCommand } from "./service-audit.js";
 import { captureGatewayServiceDefinitionBackup } from "./service-definition-backup.js";
 import {
   gatewayServiceCommandMatchesRoot,
+  isGatewayServiceEntrypointMissing,
+  resolveServiceEntrypoint,
   resolveGatewayServiceInstallationRefreshRoot,
 } from "./service-layout.js";
 import { withGatewayServiceOperationLock } from "./service-operation-lock.js";
@@ -15,7 +21,11 @@ import type {
   GatewayServiceDefinitionBackupReceipt,
   GatewayServiceDefinitionTransactionHooks,
 } from "./service-stage.js";
-import type { GatewayServiceCommandConfig, GatewayServiceEnv } from "./service-types.js";
+import {
+  hasGatewayServiceLauncherOverride,
+  type GatewayServiceCommandConfig,
+  type GatewayServiceEnv,
+} from "./service-types.js";
 import {
   GatewayServiceAuthorityError,
   isUpdateOwnedGatewayServiceCommand,
@@ -30,6 +40,7 @@ export async function reconcileGatewayServiceDefinition(params: {
   root: string | undefined;
   command: GatewayServiceCommandConfig | null;
   expectedCommand: GatewayServiceExpectedCommand;
+  repairMissingWindowsEntrypoint?: boolean;
   install: (hooks: GatewayServiceDefinitionTransactionHooks) => Promise<void>;
   warn: (message: string) => void;
 }): Promise<GatewayServiceDefinitionBackupReceipt> {
@@ -83,13 +94,19 @@ export async function reconcileGatewayServiceDefinition(params: {
           roots.map((root) => gatewayServiceCommandMatchesRoot(root, command)),
         );
         assertCurrent();
-        if (!ownership.includes(true)) {
+        if (params.repairMissingWindowsEntrypoint || !ownership.includes(true)) {
           const state = await readGatewayServiceState(resolveGatewayService(), {
             env: params.env,
             requireEffective: true,
+            ...(params.repairMissingWindowsEntrypoint ? { requireLoadedCommand: true } : {}),
           });
           assertCurrent();
-          if (!isDeepStrictEqual(state.command, command)) {
+          // Task Scheduler adds its default cwd to the effective command.
+          const inspectedCommand =
+            params.repairMissingWindowsEntrypoint && state.command?.managedDefinition
+              ? { ...state.command.managedDefinition, sourcePath: state.command.sourcePath }
+              : state.command;
+          if (!isDeepStrictEqual(inspectedCommand, command)) {
             throw new Error("Gateway service definition changed during inspection.");
           }
           const refreshRoot = await resolveGatewayServiceInstallationRefreshRoot({
@@ -100,7 +117,47 @@ export async function reconcileGatewayServiceDefinition(params: {
           const owned =
             refreshRoot && (await gatewayServiceCommandMatchesRoot(refreshRoot, command));
           assertCurrent();
-          if (!owned) {
+          const entrypoint = resolveServiceEntrypoint(command);
+          const packageRoot = entrypoint
+            ? path.win32.dirname(path.win32.dirname(entrypoint))
+            : undefined;
+          // A deleted package cannot prove its old root. Doctor may recover only
+          // the stopped canonical task; the transaction still validates all script bytes.
+          const missingWindowsEntrypointRepair =
+            params.repairMissingWindowsEntrypoint &&
+            process.platform === "win32" &&
+            state.loadState.status === "loaded" &&
+            state.runtime?.status === "stopped" &&
+            !state.runtime.pid &&
+            !hasGatewayServiceLauncherOverride(state.command) &&
+            command.environment?.OPENCLAW_SERVICE_MARKER === "openclaw" &&
+            command.environment?.OPENCLAW_SERVICE_KIND === "gateway" &&
+            entrypoint &&
+            packageRoot &&
+            path.win32.basename(packageRoot).toLowerCase() === "openclaw" &&
+            path.win32.basename(path.win32.dirname(packageRoot)).toLowerCase() === "node_modules" &&
+            buildGatewayInstallEntrypointCandidates(packageRoot).some(
+              (candidate) =>
+                path.win32.normalize(candidate).toLowerCase() ===
+                path.win32.normalize(entrypoint).toLowerCase(),
+            ) &&
+            command.sourcePath &&
+            path.win32.normalize(command.sourcePath).toLowerCase() ===
+              path.win32.normalize(resolveTaskScriptPath(params.env)).toLowerCase() &&
+            (await isGatewayServiceEntrypointMissing(command)) &&
+            (await gatewayServiceCommandMatchesRoot(params.root, {
+              programArguments: params.expectedCommand.programArguments,
+              workingDirectory: params.expectedCommand.workingDirectory,
+            })) === true;
+          assertCurrent();
+          if (missingWindowsEntrypointRepair) {
+            const expectedEntrypoint = resolveServiceEntrypoint(params.expectedCommand);
+            if (!expectedEntrypoint) {
+              throw new Error("Replacement Gateway entrypoint could not be inspected.");
+            }
+            await fs.access(expectedEntrypoint);
+            assertCurrent();
+          } else if (params.repairMissingWindowsEntrypoint || !owned) {
             throw new Error("Gateway service belongs to an unknown or foreign installation.");
           }
         }

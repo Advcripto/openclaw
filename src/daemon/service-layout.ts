@@ -3,6 +3,7 @@ import path from "node:path";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { quoteCliArg } from "../cli/quote-cli-arg.js";
 import { consumeRootCommandOptionToken, FLAG_TERMINATOR } from "../infra/cli-root-options.js";
+import { hasErrnoCode } from "../infra/errno.js";
 import { pathExists } from "../infra/fs-safe.js";
 import { readPackageName, readPackageVersion } from "../infra/package-json.js";
 import { isPathInside } from "../infra/path-guards.js";
@@ -180,6 +181,18 @@ export function resolveServiceEntrypoint(
     return path.win32.resolve(workingDirectory, entrypoint);
   }
   return undefined;
+}
+
+export async function isGatewayServiceEntrypointMissing(
+  command: Pick<GatewayServiceCommandConfig, "programArguments" | "workingDirectory">,
+): Promise<boolean> {
+  const entrypoint = resolveServiceEntrypoint(command);
+  return entrypoint
+    ? fs.access(entrypoint).then(
+        () => false,
+        (error: unknown) => hasErrnoCode(error, "ENOENT") || hasErrnoCode(error, "ENOTDIR"),
+      )
+    : false;
 }
 
 function tryRealpath(value: string): Promise<string>;

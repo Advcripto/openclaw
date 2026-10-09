@@ -2,6 +2,7 @@ import { formatCliCommand } from "../cli/command-format.js";
 import type { ManagedGatewayUpdateVerdict } from "../cli/update-cli/update-command-service-context-types.js";
 import type { PreManagedServiceStop } from "../cli/update-cli/update-command-service-maintenance.js";
 import { isManagedGatewayServiceOffline } from "../cli/update-cli/update-command-service-publication.js";
+import { isDefaultInstallIdentity } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   ServiceInspectionError,
@@ -11,8 +12,84 @@ import type { GatewayServiceState } from "../daemon/service-types.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { hasCommandProcessCleanupError } from "../process/exec-result.js";
 import type { RuntimeEnv } from "../runtime.js";
+import { resolveDoctorUpdateAdmission } from "./doctor-maintenance-admission.js";
 import type { DoctorOptions } from "./doctor-prompter.js";
-import { assertDoctorServiceSelection } from "./doctor-service-repair-policy.js";
+import { resolveDoctorRepairMode } from "./doctor-repair-mode.js";
+import {
+  assertDoctorServiceSelection,
+  isServiceRepairExternallyManaged,
+  shouldManageGatewayService,
+} from "./doctor-service-repair-policy.js";
+
+/** Missing package files cannot establish ordinary installation ownership. */
+export async function repairMissingDoctorGatewayEntrypoint(params: {
+  env: NodeJS.ProcessEnv;
+  cfg: OpenClawConfig;
+  options: DoctorOptions;
+  runtime: RuntimeEnv;
+  signal: AbortSignal;
+  writeConfig?: (nextConfig: OpenClawConfig) => Promise<OpenClawConfig>;
+  assertCustody?: () => void;
+  assertRestoreAdmission?: () => void;
+}): Promise<boolean> {
+  const { env, cfg, writeConfig, assertCustody, assertRestoreAdmission } = params;
+  if (
+    resolveDoctorRepairMode(params.options).updateInProgress ||
+    isServiceRepairExternallyManaged() ||
+    !isDefaultInstallIdentity(env) ||
+    !(await shouldManageGatewayService(env))
+  ) {
+    return false;
+  }
+  const [
+    { withGatewayServiceOperationLock },
+    { resolveGatewayService },
+    { isGatewayServiceEntrypointMissing },
+    { maybeRepairGatewayServiceConfig },
+    { createDoctorPrompter },
+  ] = await Promise.all([
+    import("../daemon/service-operation-lock.js"),
+    import("../daemon/service.js"),
+    import("../daemon/service-layout.js"),
+    import("./doctor-gateway-services.js"),
+    import("./doctor-prompter.js"),
+  ]);
+  const command = await resolveGatewayService()
+    .readCommand(env)
+    .catch(() => null);
+  if (!command || !(await isGatewayServiceEntrypointMissing(command))) {
+    return false;
+  }
+  const assertAdmission = assertRestoreAdmission ?? resolveDoctorUpdateAdmission(env).assertCurrent;
+  await withGatewayServiceOperationLock(env, async (assertNative) => {
+    const assertCurrent = () => {
+      assertNative();
+      assertCustody?.();
+      assertAdmission();
+    };
+    assertCurrent();
+    await maybeRepairGatewayServiceConfig(
+      cfg,
+      cfg.gateway?.mode ?? "local",
+      params.runtime,
+      createDoctorPrompter({
+        runtime: params.runtime,
+        options: params.options,
+        signal: params.signal,
+      }),
+      {
+        missingWindowsEntrypointOnly: true,
+        serviceMaintenance: { assertCurrent, assertReadCurrent: assertCurrent },
+        writeConfig:
+          writeConfig ??
+          (async () => {
+            throw new Error("Doctor config writer is unavailable during service recovery.");
+          }),
+      },
+    );
+  });
+  return true;
+}
 
 type StoppedGatewayInspection =
   | { kind: "owned-offline" }

@@ -16,6 +16,7 @@ import type {
   ServiceDefinitionDrift,
 } from "./service-audit-types.js";
 import { getMinimalServicePathPartsFromEnv, SERVICE_PROXY_ENV_KEYS } from "./service-env.js";
+import { isGatewayServiceEntrypointMissing, resolveServiceEntrypoint } from "./service-layout.js";
 import {
   collectInlineManagedServiceEnvKeys,
   collectInlineServiceEnvKeys,
@@ -44,6 +45,7 @@ export const SERVICE_AUDIT_CODES = {
   ...SERVICE_RUNTIME_AUDIT_CODES,
   ...SYSTEMD_SERVICE_AUDIT_CODES,
   gatewayCommandMissing: "gateway-command-missing",
+  gatewayEntrypointMissing: "gateway-entrypoint-missing",
   gatewayEntrypointMismatch: "gateway-entrypoint-mismatch",
   gatewayPathMissing: "gateway-path-missing",
   gatewayPathMissingDirs: "gateway-path-missing-dirs",
@@ -366,6 +368,18 @@ export async function auditGatewayServiceConfig(params: {
     );
   }
 
+  if (
+    platform === "win32" &&
+    params.command?.sourcePath &&
+    (await isGatewayServiceEntrypointMissing(params.command))
+  ) {
+    issues.push({
+      code: SERVICE_AUDIT_CODES.gatewayEntrypointMissing,
+      message: "Gateway service entrypoint is missing. Run openclaw doctor --fix to repair it.",
+      detail: resolveServiceEntrypoint(params.command),
+      level: "recommended",
+    });
+  }
   auditGatewayCommand(params.command?.programArguments, issues);
   auditGatewayServicePort({
     programArguments: params.command?.programArguments,
