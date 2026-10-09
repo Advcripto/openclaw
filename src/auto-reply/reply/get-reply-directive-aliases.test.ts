@@ -17,10 +17,6 @@ import { createEmptyPluginRegistry } from "../../plugins/registry-empty.js";
 import type { FinalizedTemplateContext as TemplateContext } from "../templating.js";
 import type { ReplyPayload } from "../types.js";
 import { parseInlineSessionDirectives } from "./directive-handling.parse.js";
-import {
-  reserveSkillCommandNames,
-  resolveConfiguredDirectiveAliases,
-} from "./get-reply-directive-aliases.js";
 import { clearInlineDirectives } from "./get-reply-directives-utils.js";
 import { resolveReplyDirectives } from "./get-reply-directives.js";
 import { withFastReplyConfig } from "./get-reply-fast-path.test-support.js";
@@ -729,55 +725,48 @@ describe("reply directive resolution", () => {
     expect(sessionEntry).toEqual(createSessionEntry());
   });
 
-  it("does not expose skill command names as inline model aliases", () => {
-    const reservedCommands = new Set<string>();
+  it("does not expose skill command names as inline model aliases", async () => {
     const cfg = configWithModelAlias("demo_skill");
 
-    const beforeSkillRegistration = parseInlineSessionDirectives("/demo_skill", {
-      modelAliases: resolveConfiguredDirectiveAliases({
-        cfg,
-        commandTextHasSlash: true,
-        reservedCommands,
-      }),
+    const beforeSkillRegistration = await resolveModelDirective({
+      body: "/demo_skill",
+      cfg,
     });
-    expect(beforeSkillRegistration.hasModelDirective).toBe(true);
-    expect(beforeSkillRegistration.cleaned).toBe("");
-
-    reserveSkillCommandNames({
-      reservedCommands,
-      skillCommands: [
-        {
-          name: "demo_skill",
-          skillName: "demo-skill",
-          description: "Demo skill",
-          sourceFilePath: "/tmp/demo/SKILL.md",
-        },
-      ],
+    expect(beforeSkillRegistration.result).toMatchObject({
+      kind: "continue",
+      result: { directives: { hasModelDirective: true, cleaned: "" }, cleanedBody: "" },
     });
 
-    const afterSkillRegistration = parseInlineSessionDirectives("/demo_skill", {
-      modelAliases: resolveConfiguredDirectiveAliases({
-        cfg,
-        commandTextHasSlash: true,
-        reservedCommands,
-      }),
+    skillCommandMocks.listForWorkspace.mockReturnValue([
+      {
+        name: "demo_skill",
+        skillName: "demo-skill",
+        description: "Demo skill",
+        sourceFilePath: "/tmp/demo/SKILL.md",
+      },
+    ]);
+    const afterSkillRegistration = await resolveModelDirective({ body: "/demo_skill", cfg });
+    expect(afterSkillRegistration.result).toMatchObject({
+      kind: "continue",
+      result: {
+        directives: { hasModelDirective: false, cleaned: "/demo_skill" },
+        cleanedBody: "/demo_skill",
+      },
     });
-    expect(afterSkillRegistration.hasModelDirective).toBe(false);
-    expect(afterSkillRegistration.cleaned).toBe("/demo_skill");
   });
 
-  it("does not expose chat command names as inline model aliases", () => {
-    const cfg = configWithModelAlias(" help ");
-    const reservedCommands = new Set(["help"]);
-
-    const parsed = parseInlineSessionDirectives("/help", {
-      modelAliases: resolveConfiguredDirectiveAliases({
-        cfg,
-        commandTextHasSlash: true,
-        reservedCommands,
-      }),
+  it("does not expose chat command names as inline model aliases", async () => {
+    const { result } = await resolveModelDirective({
+      body: "/help",
+      cfg: configWithModelAlias(" help "),
     });
-    expect(parsed.hasModelDirective).toBe(false);
-    expect(parsed.cleaned).toBe("/help");
+    expect(result).toMatchObject({
+      kind: "continue",
+      result: {
+        directives: { hasModelDirective: false, cleaned: "/help" },
+        cleanedBody: "",
+        inlineCommand: "/help",
+      },
+    });
   });
 });

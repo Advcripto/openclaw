@@ -43,7 +43,6 @@ const {
   revokeMessageActionTurnCapability,
 } = await import("../../gateway/message-action-turn-capability.js");
 const { resolveProviderScopedAuthProfile } = await import("./agent-runner-auth-profile.js");
-const { buildEmbeddedRunBaseParams } = await import("./agent-runner-run-params.js");
 const { setChannelSourceTurnId } = await import("./source-turn-id.js");
 
 function makeRun(overrides: Partial<FollowupRun["run"]> = {}): FollowupRun["run"] {
@@ -273,13 +272,14 @@ describe("agent-runner-utils", () => {
       authProfileIdSource: "user",
     });
 
-    const resolved = await buildEmbeddedRunBaseParams({
-      run,
+    const resolved = await buildEmbeddedRunExecutionParams({
+      run: { ...run, ...authProfile },
       provider: "openai",
       model: "gpt-4.1-mini",
       runId: "run-1",
       promptCacheKey: "webchat-cache-key",
-      authProfile,
+      sessionCtx: {},
+      hasRepliedRef: undefined,
     });
 
     expect(resolved.sessionFile).toBe(run.sessionFile);
@@ -322,9 +322,9 @@ describe("agent-runner-utils", () => {
       promptCacheKey: "stable-session-cache-key",
     });
 
-    expect(resolved.runBaseParams.runId).toBe("run-1");
-    expect(resolved.runBaseParams.promptCacheKey).toBe("stable-session-cache-key");
-    expect(resolved.runBaseParams.requestedRouteResolution).toBe("resolved");
+    expect(resolved.runId).toBe("run-1");
+    expect(resolved.promptCacheKey).toBe("stable-session-cache-key");
+    expect(resolved.requestedRouteResolution).toBe("resolved");
   });
 
   it("uses the queued conversation policy snapshot", async () => {
@@ -342,7 +342,7 @@ describe("agent-runner-utils", () => {
       runId: "run-1",
     });
 
-    expect(resolved.runBaseParams.conversationToolPolicy).toEqual({ deny: ["exec"] });
+    expect(resolved.conversationToolPolicy).toEqual({ deny: ["exec"] });
   });
 
   it("passes through recovered auto fallback provenance for embedded run params", async () => {
@@ -359,12 +359,13 @@ describe("agent-runner-utils", () => {
       primaryProvider: "openai",
     });
 
-    const resolved = await buildEmbeddedRunBaseParams({
-      run,
+    const resolved = await buildEmbeddedRunExecutionParams({
+      run: { ...run, ...authProfile },
       provider: "openai",
       model: "gpt-4.1-mini",
       runId: "run-1",
-      authProfile,
+      sessionCtx: {},
+      hasRepliedRef: undefined,
     });
 
     expect(hoisted.resolveModelFallbackAvailabilityMock).toHaveBeenCalledWith({
@@ -389,12 +390,13 @@ describe("agent-runner-utils", () => {
       primaryProvider: "openai",
     });
 
-    const resolved = await buildEmbeddedRunBaseParams({
-      run,
+    const resolved = await buildEmbeddedRunExecutionParams({
+      run: { ...run, ...authProfile },
       provider: "openai",
       model: "gpt-4.1-mini",
       runId: "run-1",
-      authProfile,
+      sessionCtx: {},
+      hasRepliedRef: undefined,
     });
 
     expect(hoisted.resolveModelFallbackAvailabilityMock).toHaveBeenCalledWith({
@@ -417,12 +419,13 @@ describe("agent-runner-utils", () => {
       primaryProvider: "minimax",
     });
 
-    const resolved = await buildEmbeddedRunBaseParams({
-      run,
+    const resolved = await buildEmbeddedRunExecutionParams({
+      run: { ...run, ...authProfile },
       provider: "minimax",
       model: "MiniMax-M2.7",
       runId: "run-1",
-      authProfile,
+      sessionCtx: {},
+      hasRepliedRef: undefined,
     });
 
     expect(resolved.enforceFinalTag).toBe(false);
@@ -460,24 +463,27 @@ describe("agent-runner-utils", () => {
       runId: "run-1",
     });
 
-    expect(resolved.runBaseParams.authProfileId).toBeUndefined();
-    expect(resolved.runBaseParams.authProfileIdSource).toBeUndefined();
-    expect(resolved.embeddedContext.sessionId).toBe(run.sessionId);
-    expect(resolved.embeddedContext.sessionKey).toBe(run.sessionKey);
-    expect(resolved.embeddedContext.agentId).toBe(run.agentId);
-    expect(resolved.embeddedContext.messageProvider).toBe("openai");
-    expect(resolved.embeddedContext.chatType).toBe("channel");
-    expect("chatType" in resolved.runBaseParams).toBe(false);
-    expect(resolved.embeddedContext.messageTo).toBe("channel-1");
-    expect(resolved.embeddedContext.chatId).toBe("native-chat-1");
-    expect(resolved.embeddedContext.memberRoleIds).toEqual(["admin", "operator"]);
-    expect(resolved.embeddedContext.currentInboundAudio).toBe(false);
-    expect(resolved.senderContext).toEqual({
+    expect(resolved.authProfileId).toBeUndefined();
+    expect(resolved.authProfileIdSource).toBeUndefined();
+    expect(resolved.sessionId).toBe(run.sessionId);
+    expect(resolved.sessionKey).toBe(run.sessionKey);
+    expect(resolved.agentId).toBe(run.agentId);
+    expect(resolved.messageProvider).toBe("openai");
+    expect(resolved.chatType).toBe("channel");
+    expect(resolved.chatType).not.toBe(run.chatType);
+    expect(resolved.messageTo).toBe("channel-1");
+    expect(resolved.chatId).toBe("native-chat-1");
+    expect(resolved.memberRoleIds).toEqual(["admin", "operator"]);
+    expect(resolved.currentInboundAudio).toBe(false);
+    expect({
+      senderId: resolved.senderId,
+      channelContext: resolved.channelContext,
+      senderName: resolved.senderName,
+      senderUsername: resolved.senderUsername,
+      senderE164: resolved.senderE164,
+    }).toEqual({
       senderId: "sender-1",
-      channelContext: {
-        sender: { id: "sender-1", providerUserId: "provider-user-1" },
-        chat: { id: "native-chat-1", topicId: "topic-1" },
-      },
+      channelContext: run.channelContext,
       senderName: undefined,
       senderUsername: undefined,
       senderE164: undefined,
@@ -505,11 +511,11 @@ describe("agent-runner-utils", () => {
       runId: "run-1",
     });
 
-    expect(resolved.embeddedContext.messageProvider).toBe("telegram");
-    expect(resolved.embeddedContext.agentAccountId).toBe("work");
-    expect(resolved.embeddedContext.chatType).toBe("group");
-    expect(resolved.embeddedContext.conversationRoutePeerId).toBe("queued-peer");
-    expect(resolved.embeddedContext.messageTo).toBe("268300329");
+    expect(resolved.messageProvider).toBe("telegram");
+    expect(resolved.agentAccountId).toBe("work");
+    expect(resolved.chatType).toBe("group");
+    expect(resolved.conversationRoutePeerId).toBe("queued-peer");
+    expect(resolved.messageTo).toBe("268300329");
   });
 
   it("hydrates the queued route before resolving channel threading policy", async () => {
@@ -558,15 +564,15 @@ describe("agent-runner-utils", () => {
       runId: "run-1",
     });
 
-    expect(resolved.embeddedContext.messageProvider).toBe("slack");
-    expect(resolved.embeddedContext.messageTo).toBe("user:U1");
-    expect(resolved.embeddedContext.currentChannelId).toBe("D1");
-    expect(resolved.embeddedContext.currentMessagingTarget).toBe("user:U1");
-    expect(resolved.embeddedContext.messageThreadId).toBe(42);
-    expect(resolved.embeddedContext.currentThreadTs).toBe("42");
-    expect(resolved.embeddedContext.agentAccountId).toBe("work");
-    expect(resolved.embeddedContext.chatType).toBe("direct");
-    expect(resolved.embeddedContext.replyToMode).toBe("off");
+    expect(resolved.messageProvider).toBe("slack");
+    expect(resolved.messageTo).toBe("user:U1");
+    expect(resolved.currentChannelId).toBe("D1");
+    expect(resolved.currentMessagingTarget).toBe("user:U1");
+    expect(resolved.messageThreadId).toBe(42);
+    expect(resolved.currentThreadTs).toBe("42");
+    expect(resolved.agentAccountId).toBe("work");
+    expect(resolved.chatType).toBe("direct");
+    expect(resolved.replyToMode).toBe("off");
   });
 
   it.each([
@@ -599,7 +605,7 @@ describe("agent-runner-utils", () => {
         runId: "run-1",
       });
 
-      expect(resolved.embeddedContext).toMatchObject({
+      expect(resolved).toMatchObject({
         currentChannelId: "reef:remote-agent",
         currentChannelProvider: "reef",
         currentMessageId,
@@ -625,7 +631,7 @@ describe("agent-runner-utils", () => {
       runId: "run-1",
     });
 
-    expect(resolved.embeddedContext.currentInboundAudio).toBe(true);
+    expect(resolved.currentInboundAudio).toBe(true);
   });
 
   it("uses telegram plugin threading context for native commands", () => {
