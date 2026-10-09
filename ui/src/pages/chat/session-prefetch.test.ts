@@ -338,7 +338,11 @@ describe("recent session prefetch", () => {
     await drainSequentially(pending, request, ["agent:main:eligible-1", "agent:main:eligible-2"]);
     expect(request).toHaveBeenCalledTimes(2);
     for (const [, params] of request.mock.calls) {
-      expect(params).toMatchObject({ limit: 20, maxBytes: 64 * 1024 });
+      expect(params).toMatchObject({
+        limit: 20,
+        maxBytes: 64 * 1024,
+        toolResultMaxChars: 2_000,
+      });
     }
     expect(locksRequest).toHaveBeenCalledWith(
       "openclaw-chat-prefetch",

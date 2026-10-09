@@ -38,6 +38,8 @@ import {
 import type { ToolStreamHost } from "./tool-stream-contract.ts";
 import { buildToolStreamIdentity } from "./tool-stream-identity.ts";
 
+const historyBudget = { limit: 80, maxBytes: 256 * 1024, toolResultMaxChars: 2_000 };
+
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
   vi.clearAllTimers();
@@ -1847,8 +1849,7 @@ describe("loadChatHistory filtering", () => {
       "chat.startup",
       {
         sessionKey: "agent:main:first",
-        limit: 80,
-        maxBytes: 256 * 1024,
+        ...historyBudget,
       },
       { signal: expect.any(AbortSignal), timeoutMs: 30_000 },
     );
@@ -1856,8 +1857,7 @@ describe("loadChatHistory filtering", () => {
       "chat.startup",
       {
         sessionKey: "agent:main:second",
-        limit: 80,
-        maxBytes: 256 * 1024,
+        ...historyBudget,
       },
       { signal: expect.any(AbortSignal), timeoutMs: 30_000 },
     );
@@ -1911,8 +1911,7 @@ describe("loadChatHistory retry handling", () => {
       "chat.startup",
       {
         sessionKey: "main",
-        limit: 80,
-        maxBytes: 256 * 1024,
+        ...historyBudget,
       },
       { signal: expect.any(AbortSignal), timeoutMs: 30_000 },
     );
@@ -2448,20 +2447,19 @@ describe("loadChatHistory retry handling", () => {
     const thirdLoad = loadChatHistory(state);
 
     expect(request.mock.calls.map(([method, params]) => [method, params])).toEqual([
-      ["chat.history", { sessionKey: "main", limit: 80, maxBytes: 256 * 1024 }],
+      ["chat.history", { sessionKey: "main", ...historyBudget }],
     ]);
     expect(state.chatMessages).toEqual([pending]);
 
     staleHistory.resolve(createAssistantHistory("stale history"));
     await firstLoad;
     expect(request.mock.calls.map(([method, params]) => [method, params])).toEqual([
-      ["chat.history", { sessionKey: "main", limit: 80, maxBytes: 256 * 1024 }],
+      ["chat.history", { sessionKey: "main", ...historyBudget }],
       [
         "chat.history",
         {
           sessionKey: "main",
-          limit: 80,
-          maxBytes: 256 * 1024,
+          ...historyBudget,
           inputRunIds: ["same-session-pending-run"],
         },
       ],
