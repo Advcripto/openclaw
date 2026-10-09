@@ -7,7 +7,6 @@ import {
   observeParentSqlite,
   sqliteMethods,
 } from "../../../test/helpers/sqlite-parent-observer.js";
-import { resolveHeartbeatSession } from "../../infra/heartbeat-runner-session.js";
 import { openNodeSqliteDatabase } from "../../infra/node-sqlite.js";
 import type { SqliteWorkerOperationSettlement } from "../../infra/sqlite-worker-operation-settlement.js";
 import { createDeferredCore } from "../../shared/deferred.js";
@@ -61,8 +60,8 @@ afterAll(async () => {
   await state.cleanup();
 });
 
-it("shares cold database admission with an immediate heartbeat", async () => {
-  const agentId = "heartbeat-admission";
+it("shares cold database admission across concurrent session readers", async () => {
+  const agentId = "concurrent-admission";
   const scope = {
     agentId,
     env: state.env,
@@ -90,32 +89,24 @@ it("shares cold database admission with an immediate heartbeat", async () => {
       };
     });
   const first = readSessionEntryInWorker(scope);
-  let heartbeat: Promise<Awaited<ReturnType<typeof resolveHeartbeatSession>>> | undefined;
+  let concurrent: ReturnType<typeof readSessionEntryInWorker> | undefined;
   try {
     await awaitGateBeforeSettlement(entered.promise, first, "Hook admission was not held");
-    heartbeat = Promise.resolve(
-      resolveHeartbeatSession(
-        { session: { store: scope.storePath } },
-        agentId,
-        undefined,
-        undefined,
-        state.env,
-      ),
-    );
-    void heartbeat.catch(() => {});
+    concurrent = readSessionEntryInWorker({ ...scope, sessionKey: `agent:${agentId}:main` });
+    void concurrent.catch(() => {});
     release.resolve();
     await expect(first).resolves.toBeUndefined();
-    await expect(heartbeat).resolves.toMatchObject({ entry: undefined });
+    await expect(concurrent).resolves.toBeUndefined();
   } finally {
     release.resolve();
-    await Promise.allSettled([first, heartbeat]);
+    await Promise.allSettled([first, concurrent]);
     intercept.mockRestore();
   }
 });
 
-it("preserves heartbeat entries and SQLite creation without materializing the JSON locator", async () => {
+it("preserves session entries and SQLite creation without materializing the JSON locator", async () => {
   for (const reader of ["native", "worker"] as const) {
-    const agentId = `heartbeat-${reader}`;
+    const agentId = `session-${reader}`;
     const scope = {
       agentId,
       env: state.env,
@@ -123,41 +114,25 @@ it("preserves heartbeat entries and SQLite creation without materializing the JS
       sessionKey: `agent:${agentId}:main`,
     };
     const databasePath = resolveOpenClawAgentSqlitePath(scope);
-    const cfg = { session: { store: scope.storePath } };
     expect(fs.existsSync(databasePath)).toBe(false);
     if (reader === "native") {
       expect(loadSessionEntry(scope)).toBeUndefined();
     } else {
-      await expect(
-        resolveHeartbeatSession(cfg, agentId, undefined, undefined, state.env),
-      ).resolves.toEqual({
-        sessionKey: scope.sessionKey,
-        storePath: scope.storePath,
-        suppressOriginatingContext: false,
-        entry: undefined,
-      });
+      await expect(readSessionEntryInWorker(scope)).resolves.toBeUndefined();
     }
     expect(fs.existsSync(databasePath)).toBe(true);
     expect(fs.existsSync(scope.storePath)).toBe(false);
     const entry = {
-      sessionId: `heartbeat-${reader}-session`,
+      sessionId: `session-${reader}-session`,
       updatedAt: 123,
       lastChannel: "telegram",
       lastTo: "group:operations",
       deliveryContext: { channel: "telegram", to: "group:operations", threadId: 42 },
-      heartbeatIsolatedBaseSessionKey: scope.sessionKey,
     };
     replaceSessionEntrySync(scope, entry);
     const native = loadSessionEntry(scope);
     expect(native).toMatchObject(entry);
-    await expect(
-      resolveHeartbeatSession(cfg, agentId, undefined, undefined, state.env),
-    ).resolves.toEqual({
-      sessionKey: scope.sessionKey,
-      storePath: scope.storePath,
-      suppressOriginatingContext: false,
-      entry: native,
-    });
+    await expect(readSessionEntryInWorker(scope)).resolves.toEqual(native);
     expect(fs.existsSync(scope.storePath)).toBe(false);
   }
 });

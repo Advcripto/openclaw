@@ -30,7 +30,6 @@ describe("normalizeInboundTextNewlines", () => {
 
 describe("inbound context contract (providers + extensions)", () => {
   it.each([
-    ["heartbeat", "heartbeat"],
     ["cron-event", "cron"],
     ["exec-event", "exec"],
   ] as const)("folds the legacy %s source without changing the reply route", (provider, source) => {

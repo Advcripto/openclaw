@@ -263,7 +263,6 @@ export async function resolveFollowupDeliveryDecision(params: {
           sourceReplyDeliveryMode: sourcePolicy.sourceReplyDeliveryMode,
           sendPolicyDenied: sourcePolicy.sendPolicyDenied,
           successfulSourceReplyDelivery: completedSourceDelivery,
-          isHeartbeat: false,
           isRoomEvent: false,
         });
   if (recovery.kind === "retry") {
@@ -414,7 +413,6 @@ async function sendFollowupPayloads(params: {
   const typing = createTypingSignaler({
     typing: defaults.typing,
     mode: defaults.typingMode,
-    isHeartbeat: false,
   });
   const crossChannelFailures: ReplyPayload[] = [];
   const queuedPayloads: ReplyPayload[] = [];

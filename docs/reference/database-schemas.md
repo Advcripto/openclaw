@@ -11,6 +11,11 @@ title: "Database schemas"
 
 OpenClaw stores control-plane state in the shared state database and agent data in one SQLite database per agent. Schema migrations run forward when a database opens. Older OpenClaw builds refuse databases written by a newer schema.
 
+Current shared state uses [schema 21](/reference/database-schemas/state-schema-history#state-schema-21),
+which fences ordinary automation policies after Heartbeat retirement without adding
+tables. The agent schema remains 24. Deferred physical cleanup is recorded in the
+[state storage README](https://github.com/openclaw/openclaw/blob/main/src/state/README.md).
+
 Native SQLite initialization reads the loaded library's version and extension
 capability in one query before admitting real state databases. Auth-profile
 readers install their lock-wait timeout at connection open.

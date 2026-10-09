@@ -342,8 +342,6 @@ export async function prepareEmbeddedAttemptToolBase(params: {
         inputProvenance: attempt.inputProvenance,
         disableMessageTool: attempt.disableMessageTool,
         forceMessageTool: attempt.forceMessageTool,
-        enableHeartbeatTool: attempt.enableHeartbeatTool,
-        forceHeartbeatTool: attempt.forceHeartbeatTool,
         inheritedToolAllowlistRef: inheritedToolAllowlist,
         cronCreatorToolAllowlistRef: cronCreatorToolAllowlist,
         cronCreatorToolAllowlistCaptureRef,

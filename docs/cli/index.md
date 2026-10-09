@@ -344,7 +344,6 @@ openclaw [--dev] [--profile <name>] <command>
   logs
   system
     event
-    heartbeat last|enable|disable
     presence
   models
     list

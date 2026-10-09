@@ -97,8 +97,6 @@ export async function executeFollowupTurn(params: {
       cfg: turn.config,
     });
   turn.queued.run.terminalReplyExpectation = terminalReplyExpectation;
-  // Queued turns are never heartbeats; heartbeat runs never supply the drain callback.
-  const isHeartbeat = false;
   const roomEvent = turn.queued.currentInboundEventKind === "room_event";
   const deliveryAllowed = () => turn.sendPolicy === "allow" && !roomEvent;
   const progressAllowed = () =>
@@ -278,7 +276,6 @@ export async function executeFollowupTurn(params: {
   const baseTypingSignals = createTypingSignaler({
     typing: defaults.typing,
     mode: progressAllowed() ? defaults.typingMode : "never",
-    isHeartbeat,
   });
   const typingSignals: TypingSignaler = {
     ...baseTypingSignals,
@@ -294,8 +291,10 @@ export async function executeFollowupTurn(params: {
   };
   const progressOpts: InternalGetReplyOptions = {
     ...sourceOpts,
-    isHeartbeat,
     sourceReplyDeliveryMode: turn.queued.run.sourceReplyDeliveryMode,
+    bootstrapContextMode: turn.queued.run.bootstrapContextMode,
+    cleanupBundleMcpOnRunEnd: undefined,
+    scheduledAutomation: turn.queued.run.scheduledAutomation,
     internalEventExecution: turn.queued.run.internalEventExecution,
     // A refreshed runner owns presentation defaults, never another source's authority or callbacks.
     operatorAuthority: turn.queued.operatorAuthority,
@@ -457,7 +456,6 @@ export async function executeFollowupTurn(params: {
           shouldEmitToolResult,
           shouldEmitToolOutput,
           pendingToolTasks,
-          isHeartbeat,
           sessionKey: turn.session.kind === "session" ? turn.session.key : undefined,
           runtimePolicySessionKey: turn.queued.run.runtimePolicySessionKey,
           getActiveSessionEntry: turn.session.current,
@@ -502,7 +500,6 @@ export async function executeFollowupTurn(params: {
         outcome: {
           kind: "rejected",
           payload: buildTerminalAgentRunFailureReplyPayload({
-            isHeartbeat,
             replyExpectation: terminalReplyExpectation,
             visibleReplyDelivered,
           }),

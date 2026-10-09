@@ -93,12 +93,10 @@ export function resolveSourceReplyDeliveryMode(params: {
 export function resolveSourceReplyExpectation(params: {
   ctx: SourceReplyDeliveryModeContext;
   cfg: OpenClawConfig;
-  isHeartbeat?: boolean;
 }): ReplyExpectation {
   if (
     isSyntheticSourceReplyTurn({
       inputProvenance: params.ctx.InputProvenance,
-      isHeartbeat: params.isHeartbeat,
     })
   ) {
     return "optional";
@@ -147,13 +145,11 @@ export function resolveSourceReplyVisibilityPolicy(params: {
    */
   sessionStableMessageToolAvailable?: boolean;
   defaultVisibleReplies?: "automatic" | "message_tool";
-  isHeartbeat?: boolean;
 }) {
   const sourceReplyDeliveryMode = resolveSourceReplyDeliveryMode(params);
   const hasStableTurnOverride =
     !isSyntheticSourceReplyTurn({
       inputProvenance: params.ctx.InputProvenance,
-      isHeartbeat: params.isHeartbeat,
     }) &&
     (params.requested !== undefined || isExplicitCommandTurnContext(params.ctx, params.cfg));
   const sessionStableSourceReplyDeliveryMode = hasStableTurnOverride
