@@ -15,8 +15,8 @@ services:
       - OPENCLAW_GATEWAY_PORT=18789
       - OPENCLAW_SKIP_CHANNELS=1
       - OPENCLAW_UI_DEV_GATEWAY_URL=http://localhost:18789
-      - OPENCLAW_RUN_NODE_SKIP_DTS_BUILD=1
-      - OPENCLAW_TSDOWN_MAX_OLD_SPACE_MB=4096
+      - OPENCLAW_COMPILE_CACHE_DISABLED_RESPAWNED=1
+      - NODE_DISABLE_COMPILE_CACHE=1
       - BASE44_PREVIEW_MODE=1
       - __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS
     ports:
@@ -28,8 +28,7 @@ services:
         corepack enable
         corepack prepare pnpm@12.7.0 --activate
         pnpm install --frozen-lockfile
-        pnpm build
-        node dist/index.js gateway --bind loopback --port 18789 &
+        node --import ./scripts/tsx.mjs src/entry.ts gateway --dev --port 18789 --allow-unconfigured &
         cd ui && exec node ../scripts/run-node-package-bin.mts vite --host 0.0.0.0
     healthcheck:
       test:
@@ -40,7 +39,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 1200s
+      start_period: 600s
     restart: on-failure
 
 volumes:
